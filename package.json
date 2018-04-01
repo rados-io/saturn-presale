@@ -1,0 +1,17 @@
+{
+  "name": "saturnpresale",
+  "version": "1.0.0",
+  "description": "``` # events:",
+  "main": "truffle-config.js",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "solidity-coverage": "^0.4.15"
+  }
+}
