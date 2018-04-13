@@ -8,7 +8,7 @@ Having a time lockup ensures two things:
 2. Investors that do participate have an aligned vision and are comfortable supporting the project long term.
 
 ### Events
-```
+```js
 // called when presale is activated
 event Activated(uint256 time);
 // called when presale is stopped
@@ -21,7 +21,7 @@ event Claim(address indexed purchaser, uint256 id, uint256 amount);
 
 ### Useful methods
 
-```
+```js
 presale = contract(abi); // load the contract interface in web3.js
 
 // buy tokens
