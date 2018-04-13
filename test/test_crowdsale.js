@@ -2,8 +2,8 @@ var AnotherToken = artifacts.require("./AnotherToken.sol")
 var Presale      = artifacts.require("./SaturnPresale.sol")
 var Saturn       = artifacts.require("./Saturn.sol")
 
-const initialBalance = web3.eth.getBalance(web3.eth.accounts[2])
-const secondsInYear = 31536000
+const initialTreasuryBalance = web3.eth.getBalance(web3.eth.accounts[2])
+const weeks = 60 * 60 * 24 * 7
 
 // helper functions
 function assertJump(error) {
@@ -134,7 +134,7 @@ contract('Presale', function(accounts) {
     }
   })
 
-  it("Rejects transfers of small sums of money", async () => {
+  it("Rejects money transfers outside of smart contract functionality", async () => {
     const presale = await Presale.deployed()
 
     try {
@@ -145,45 +145,86 @@ contract('Presale', function(accounts) {
     }
   })
 
-  it("Properly assigns balances and lockups for a purchase", async () => {
+  it("Processes short purchase", async () => {
     const presale = await Presale.deployed()
-    let purchaseAmount = 1000000000 * 100
+    const saturn = await Saturn.deployed()
 
-    var ts = Math.round((new Date()).getTime() / 1000);
+    var ts = Math.round((new Date()).getTime() / 1000)
+    var send = await presale.shortBuy({value: web3.toWei(1, 'ether')})
+    var purchase = send.logs[0].args
 
-    var send = await web3.eth.sendTransaction({from: accounts[0], to: presale.address, value: purchaseAmount, gas: 900000});
+    assert.equal(purchase.purchaser, accounts[0])
+    assert.equal(purchase.amount.toString(), '550000000')
+    assert.equal(purchase.redeemAt.minus(purchase.purchasedAt).toString(), 12 * weeks)
 
-    let purchased = await presale.balanceOf(accounts[0])
-    let lockup = await presale.lockupOf(accounts[0])
+    var amount  = await presale.amountOf(purchase.id)
+    var lockup  = await presale.lockupOf(purchase.id)
+    var owner   = await presale.ownerOf(purchase.id)
+    var claimed = await presale.isClaimed(purchase.id)
+
+    assert.equal(amount.toString(), purchase.amount.toString())
+    assert.equal(lockup.toString(), purchase.redeemAt.toString())
+    assert.equal(owner, web3.eth.coinbase)
+    assert.equal(claimed, false)
+
+    //cannot redeem before the deadline
+    try {
+      await presale.redeem(purchase.id)
+      assert.fail('Rejected!')
+    } catch(error) {
+      assertJump(error)
+    }
+
+    increaseSeconds(12 * weeks + 100)
+
     let sold = await presale.sold()
+    let tokenBalanceBefore = await saturn.balanceOf(presale.address)
+    await presale.redeem(purchase.id)
+    let tokenBalanceAfter = await saturn.balanceOf(presale.address)
+
+    assert.equal(tokenBalanceBefore.minus(sold).toString(), tokenBalanceAfter.toString())
 
     let updatedTreasuryBalance = web3.eth.getBalance(web3.eth.accounts[2])
-    let balanceDiff = parseInt(updatedTreasuryBalance.minus(initialBalance).toString())
-    assert.equal(balanceDiff, purchaseAmount)
+    let balanceDiff = parseInt(updatedTreasuryBalance.minus(initialTreasuryBalance).toString())
+    assert.equal(balanceDiff, web3.toWei(1, 'ether'))
+    assert.equal(sold.toString(), purchase.amount.toString())
 
-    assert.equal(purchased.toString(), sold.toString())
-    assert.equal(purchased.toString(), '100')
+    claimed = await presale.isClaimed(purchase.id)
+    assert.equal(claimed, true)
 
-    let hodlDuration = parseInt(lockup.toString()) - ts
-    assert.isBelow(hodlDuration - secondsInYear, 10)
+    //cannot redeem again
+    try {
+      await presale.redeem(purchase.id)
+      assert.fail('Rejected!')
+    } catch(error) {
+      assertJump(error)
+    }
   })
 
-  it("Does not increase lockup period for subsequent investment", async () => {
+  it("Processes medium purchase", async () => {
     const presale = await Presale.deployed()
-    let purchaseAmount = 1000000000 * 100
+    const saturn = await Saturn.deployed()
 
-    let lockupBefore = await presale.lockupOf(accounts[0])
+    var ts = Math.round((new Date()).getTime() / 1000)
+    var send = await presale.mediumBuy({value: web3.toWei(1, 'ether')})
+    var purchase = send.logs[0].args
 
-    var send = await web3.eth.sendTransaction({from: accounts[0], to: presale.address, value: purchaseAmount, gas: 900000});
+    assert.equal(purchase.purchaser, accounts[0])
+    assert.equal(purchase.amount.toString(), '625000000')
+    assert.equal(purchase.redeemAt.minus(purchase.purchasedAt).toString(), 24 * weeks)
+  })
 
-    let lockupAfter = await presale.lockupOf(accounts[0])
-    let sold = await presale.sold()
-    let purchased = await presale.balanceOf(accounts[0])
+  it("Processes long purchase", async () => {
+    const presale = await Presale.deployed()
+    const saturn = await Saturn.deployed()
 
-    assert.equal(purchased.toString(), sold.toString())
-    assert.equal(purchased.toString(), '200')
+    var ts = Math.round((new Date()).getTime() / 1000)
+    var send = await presale.longBuy({value: web3.toWei(1, 'ether')})
+    var purchase = send.logs[0].args
 
-    assert.equal(lockupAfter.toString(), lockupBefore.toString())
+    assert.equal(purchase.purchaser, accounts[0])
+    assert.equal(purchase.amount.toString(), '750000000')
+    assert.equal(purchase.redeemAt.minus(purchase.purchasedAt).toString(), 52 * weeks)
   })
 
   it("Rejects transaction if ETH amount sent is too small", async () => {
@@ -197,11 +238,11 @@ contract('Presale', function(accounts) {
     }
   })
 
-  it("Rejects transaction if ETH amount sent is too large", async () => {
+  it("Doesn't allow to redeem unrealistic purchase ids", async () => {
     const presale = await Presale.deployed()
 
     try {
-      await web3.eth.sendTransaction({from: accounts[1], to: presale.address, value: web3.toWei(80, 'ether'), gas: 900000});
+      await presale.redeem(99999999)
       assert.fail('Rejected!')
     } catch(error) {
       assertJump(error)
@@ -220,44 +261,6 @@ contract('Presale', function(accounts) {
     } catch(error) {
       assertJump(error)
     }
-  })
-
-  it("Doesn't allow to redeem anything if you didn't invest", async () => {
-    const presale = await Presale.deployed()
-
-    try {
-      await presale.redeem({from: accounts[3]})
-      assert.fail('Rejected!')
-    } catch(error) {
-      assertJump(error)
-    }
-  })
-
-  it("Doesn't allow to redeem before lockup is up", async () => {
-    const presale = await Presale.deployed()
-
-    try {
-      await presale.redeem()
-      assert.fail('Rejected!')
-    } catch(error) {
-      assertJump(error)
-    }
-  })
-
-  it("Allows you to redeem after the lockup is over", async () => {
-    const presale = await Presale.deployed()
-    const saturn = await Saturn.deployed()
-
-    let saturnBalanceBefore = await saturn.balanceOf(accounts[0])
-    let presaleBalanceBefore = await presale.balanceOf(accounts[0])
-    increaseSeconds(secondsInYear)
-
-    await presale.redeem()
-    let saturnBalanceAfter = await saturn.balanceOf(accounts[0])
-    let presaleBalanceAfter = await presale.balanceOf(accounts[0])
-
-    assert.equal(presaleBalanceAfter.toString(), '0')
-    assert.equal(saturnBalanceAfter.toString(), saturnBalanceBefore.plus(presaleBalanceBefore).toString())
   })
 
   it("Allows the owner to end presale", async () => {
